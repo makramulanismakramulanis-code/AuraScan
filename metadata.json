@@ -1,0 +1,6 @@
+{
+  "name": "AuraScan",
+  "description": "Smart AI Document Scanner & Expense Manager with on-device OCR, Indian GST bill detection, instant PDF export, and productivity tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
