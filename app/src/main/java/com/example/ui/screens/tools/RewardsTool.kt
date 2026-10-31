@@ -208,7 +208,7 @@ fun RewardsTool(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Watch a video ad to earn 100 AuraCoins. If a live ad is unavailable, you can use the 5-second simulation to earn your reward. Use coins for HD PDF exports and AI OCR.",
+                        text = "Watch a video ad to earn 50 AuraCoins. If a live ad is unavailable, you can use the 5-second simulation to earn your reward. Use coins for HD PDF exports and AI OCR.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -237,7 +237,7 @@ fun RewardsTool(
                         val btnText = when {
                             remainingRewarded <= 0 -> "Daily Limit Reached (5/5)"
                             cooldownSec > 0 -> "Cooldown (${cooldownSec}s)"
-                            else -> "🎬 Watch Rewarded Video Ad (+100 Coins)"
+                            else -> "🎬 Watch Rewarded Video Ad (+50 Coins)"
                         }
                         Text(
                             text = btnText,

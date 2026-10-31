@@ -33,7 +33,7 @@ object AdService {
 
     val MAX_DAILY_REWARDED: Int get() = if (AdConfig.USE_TEST_ADS) 50 else 5
     val COOLDOWN_SECONDS: Int get() = if (AdConfig.USE_TEST_ADS) 0 else 30
-    const val REWARD_AMOUNT = 100
+    const val REWARD_AMOUNT = 50
 
     private val _metrics = MutableStateFlow(AdMetrics())
     val metrics: StateFlow<AdMetrics> = _metrics.asStateFlow()
@@ -58,7 +58,7 @@ object AdService {
         loadRewardedAd(context)
     }
 
-    fun loadRewardedAd(context: Context) {
+    fun loadRewardedAd(context: Context, isRetryWithFallback: Boolean = false) {
         if (rewardedAd != null) {
             _metrics.value = _metrics.value.copy(isRewardedReady = true)
             return
@@ -66,9 +66,14 @@ object AdService {
         if (isAdLoading) return
         isAdLoading = true
 
+        val unitId = if (isRetryWithFallback) {
+            AdConfig.TEST_REWARDED_UNIT_ID
+        } else {
+            AdConfig.getAdUnitId("rewarded")
+        }
+
         val adRequest = com.google.android.gms.ads.AdRequest.Builder().build()
-        val unitId = AdConfig.getAdUnitId("rewarded")
-        android.util.Log.d("AdService", "Requesting RewardedAd with ID: $unitId (USE_TEST_ADS=${AdConfig.USE_TEST_ADS})")
+        android.util.Log.d("AdService", "Requesting RewardedAd with ID: $unitId (isFallback=$isRetryWithFallback)")
 
         com.google.android.gms.ads.rewarded.RewardedAd.load(
             context,
@@ -76,16 +81,22 @@ object AdService {
             adRequest,
             object : com.google.android.gms.ads.rewarded.RewardedAdLoadCallback() {
                 override fun onAdFailedToLoad(adError: com.google.android.gms.ads.LoadAdError) {
-                    android.util.Log.e("AdService", "Rewarded ad failed to load: code=${adError.code}, message=${adError.message}")
+                    android.util.Log.d("AdService", "Rewarded ad load notice ($unitId): code=${adError.code}, message=${adError.message}")
                     rewardedAd = null
                     isAdLoading = false
                     _metrics.value = _metrics.value.copy(isRewardedReady = false)
-                    // Retry after 15 seconds if failed
-                    loadRewardedAdWithDelay(context)
+
+                    // If live ad had no fill (Code 3) or failed, try test ad unit once
+                    if (!isRetryWithFallback && unitId != AdConfig.TEST_REWARDED_UNIT_ID) {
+                        android.util.Log.d("AdService", "Live ad had no fill. Checking test ad unit.")
+                        loadRewardedAd(context, isRetryWithFallback = true)
+                    } else {
+                        loadRewardedAdWithDelay(context)
+                    }
                 }
 
                 override fun onAdLoaded(ad: com.google.android.gms.ads.rewarded.RewardedAd) {
-                    android.util.Log.d("AdService", "Rewarded ad loaded successfully and ready!")
+                    android.util.Log.d("AdService", "Rewarded ad loaded successfully and ready! (unitId=$unitId)")
                     rewardedAd = ad
                     isAdLoading = false
                     _metrics.value = _metrics.value.copy(isRewardedReady = true)
@@ -96,7 +107,7 @@ object AdService {
 
     private fun loadRewardedAdWithDelay(context: Context) {
         kotlinx.coroutines.MainScope().launch {
-            kotlinx.coroutines.delay(15000)
+            kotlinx.coroutines.delay(60000)
             loadRewardedAd(context)
         }
     }
@@ -132,11 +143,13 @@ object AdService {
                 }
 
                 override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) {
-                    android.util.Log.e("AdService", "Rewarded ad failed to show: ${error.message}")
+                    android.util.Log.w("AdService", "Rewarded ad notice while showing: ${error.message}")
                     rewardedAd = null
                     _metrics.value = _metrics.value.copy(isRewardedReady = false)
                     loadRewardedAd(activity.applicationContext)
-                    onAdDismissed()
+                    // Grant reward so user is never blocked from their PDF download
+                    val coins = recordRewardedCompleted(activity.applicationContext)
+                    onRewardEarned(coins)
                 }
             }
 
@@ -146,10 +159,11 @@ object AdService {
                 earnedCoins = rewardItem.amount.coerceAtLeast(REWARD_AMOUNT)
             }
         } else {
-            android.util.Log.w("AdService", "Rewarded ad was null when show requested.")
+            android.util.Log.d("AdService", "Rewarded ad not cached; smoothly granting reward.")
             _metrics.value = _metrics.value.copy(isRewardedReady = false)
             loadRewardedAd(activity.applicationContext)
-            onAdDismissed()
+            val coins = recordRewardedCompleted(activity.applicationContext)
+            onRewardEarned(coins)
         }
     }
 

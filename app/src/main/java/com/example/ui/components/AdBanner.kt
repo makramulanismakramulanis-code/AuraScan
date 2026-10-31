@@ -82,10 +82,17 @@ fun PinnedAdBanner(
                     AdView(ctx).apply {
                         setAdSize(AdSize.BANNER)
                         adUnitId = AdConfig.getAdUnitId("banner")
+                        adListener = object : com.google.android.gms.ads.AdListener() {
+                            override fun onAdFailedToLoad(loadAdError: com.google.android.gms.ads.LoadAdError) {
+                                if (adUnitId != AdConfig.TEST_BANNER_UNIT_ID) {
+                                    adUnitId = AdConfig.TEST_BANNER_UNIT_ID
+                                    loadAd(AdRequest.Builder().build())
+                                }
+                            }
+                        }
                     }
                 },
                 update = { adView ->
-                    // Only load ad if it hasn't been loaded or needs refresh
                     adView.loadAd(AdRequest.Builder().build())
                 }
             )

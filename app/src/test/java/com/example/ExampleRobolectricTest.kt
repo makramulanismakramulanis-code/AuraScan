@@ -44,4 +44,24 @@ class ExampleRobolectricTest {
     assertNotNull(storage.expenses.value)
     assertTrue(storage.coins.value >= 350)
   }
+
+  @Test
+  fun `verify rewarded ad reward amount is 50 coins`() {
+    assertEquals(50, AdService.REWARD_AMOUNT)
+  }
+
+  @Test
+  fun `verify PDF export deduction of 250 coins`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val storage = AppStorage(context)
+    val startCoins = storage.coins.value
+    // Spend 250 coins for PDF download
+    val spent = storage.spendCoins(250)
+    assertTrue(spent)
+    assertEquals(startCoins - 250, storage.coins.value)
+
+    // Add 50 coins from watching 1 ad
+    storage.addCoins(AdService.REWARD_AMOUNT)
+    assertEquals(startCoins - 200, storage.coins.value)
+  }
 }

@@ -68,10 +68,7 @@ class MainActivity : ComponentActivity() {
             .build()
         MobileAds.setRequestConfiguration(requestConfig)
 
-        MobileAds.initialize(this) { 
-            // Load the first ad as soon as SDK is ready
-            AdService.loadRewardedAd(applicationContext)
-        }
+        MobileAds.initialize(this)
         val storage = AppStorage(applicationContext)
         AdService.init(applicationContext)
 
@@ -239,7 +236,10 @@ fun AuraScanApp(
                                 },
                                 onViewExpenseReport = { currentTab = AppTab.TOOLS },
                                 onDocumentClick = { currentTab = AppTab.LIBRARY },
-                                onViewAllScans = { currentTab = AppTab.LIBRARY }
+                                onViewAllScans = { currentTab = AppTab.LIBRARY },
+                                userCoins = coins,
+                                onAddCoins = { storage.addCoins(it) },
+                                onSpendCoins = { storage.spendCoins(it) }
                             )
                         }
 

@@ -19,9 +19,8 @@ object AdConfig {
     const val TEST_BANNER_UNIT_ID: String = "ca-app-pub-3940256099942544/6300978111"
     const val TEST_REWARDED_UNIT_ID: String = "ca-app-pub-3940256099942544/5224354917"
 
-    // In DEBUG mode or testing, automatically use official AdMob test ads for 100% fill rate.
-    // In RELEASE mode, automatically uses live production ads.
-    var USE_TEST_ADS: Boolean = BuildConfig.DEBUG
+    // User's live AdMob production IDs are primary
+    var USE_TEST_ADS: Boolean = false
 
     fun getAdUnitId(type: String): String {
         return when (type) {
