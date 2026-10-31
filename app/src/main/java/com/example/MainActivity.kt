@@ -63,7 +63,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        MobileAds.initialize(this) {}
+        val requestConfig = com.google.android.gms.ads.RequestConfiguration.Builder()
+            .setTestDeviceIds(listOf(com.google.android.gms.ads.AdRequest.DEVICE_ID_EMULATOR))
+            .build()
+        MobileAds.setRequestConfiguration(requestConfig)
+
+        MobileAds.initialize(this) { 
+            // Load the first ad as soon as SDK is ready
+            AdService.loadRewardedAd(applicationContext)
+        }
         val storage = AppStorage(applicationContext)
         AdService.init(applicationContext)
 

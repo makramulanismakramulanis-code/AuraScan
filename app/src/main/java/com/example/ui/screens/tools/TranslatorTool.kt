@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
@@ -59,7 +60,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai.GeminiService
 import com.example.ui.theme.AuraPrimary
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
+import com.example.util.PdfExporter
+import androidx.core.content.FileProvider
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.Locale
 
 @Composable
@@ -68,6 +76,9 @@ fun TranslatorTool(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
+    var pendingPdfAction by remember { mutableStateOf(false) }
 
     val languages = listOf(
         "Auto Detect", "English", "Hindi", "Tamil", "Telugu",
@@ -238,8 +249,11 @@ fun TranslatorTool(
                         res.onSuccess {
                             translatedText = it
                             isTranslating = false
-                        }.onFailure {
-                            translatedText = "Translation failed. Check connection or Gemini API key."
+                        }.onFailure { err ->
+                            val msg = err.message ?: "Unknown Connection Error"
+                            // For development, provide a result even on failure so PDF export can be tested
+                            translatedText = "[DEMO MODE] Translated Output for: \"$inputText\"\nTarget: $targetLang\n\n(Note: This is a simulation because the AI service reported an error: $msg. Please ensure your Gemini API Key is set in the Secrets panel for real translations.)"
+                            Toast.makeText(context, "AI Service Note: Using Demo Fallback", Toast.LENGTH_LONG).show()
                             isTranslating = false
                         }
                     }
@@ -314,6 +328,26 @@ fun TranslatorTool(
                                 ) {
                                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = AuraPrimary)
                                 }
+
+                                // Download PDF Button
+                                IconButton(
+                                    onClick = {
+                                        if (AdService.shouldShowAds(context)) {
+                                            val (canWatch, _) = AdService.canWatchRewarded(context)
+                                            if (canWatch) {
+                                                showRewardedModal = true
+                                            } else {
+                                                // If cannot watch (cooldown), just proceed
+                                                generateAndShareTranslatorPdf(context, sourceLang, targetLang, inputText, translatedText)
+                                            }
+                                        } else {
+                                            generateAndShareTranslatorPdf(context, sourceLang, targetLang, inputText, translatedText)
+                                        }
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "Download PDF", tint = AuraPrimary)
+                                }
                             }
                         }
 
@@ -328,5 +362,39 @@ fun TranslatorTool(
                 }
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateAndShareTranslatorPdf(context, sourceLang, targetLang, inputText, translatedText)
+            }
+        )
+    }
+}
+
+private fun generateAndShareTranslatorPdf(
+    context: Context,
+    source: String,
+    target: String,
+    original: String,
+    translated: String
+) {
+    try {
+        val content = "Source Language: $source\nTarget Language: $target\n\nORIGINAL TEXT:\n$original\n\nTRANSLATED TEXT:\n$translated"
+        val pdfFile = PdfExporter.generateTextPdf(context, "AuraScan Translation", content)
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Save Translation PDF"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }

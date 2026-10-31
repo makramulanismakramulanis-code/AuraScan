@@ -64,6 +64,8 @@ import com.example.model.MarkSheetData
 import com.example.model.SubjectScore
 import com.example.ui.theme.AuraPrimary
 import com.example.util.PdfExporter
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -74,6 +76,8 @@ fun MarkSheetTool(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     var studentName by remember { mutableStateOf("Rahul Sharma") }
     var rollNumber by remember { mutableStateOf("AS-2026-904") }
@@ -353,31 +357,16 @@ fun MarkSheetTool(
             // Download Mark Sheet PDF Button
             Button(
                 onClick = {
-                    val data = MarkSheetData(
-                        studentName = studentName,
-                        rollNumber = rollNumber,
-                        boardCouncil = boardCouncil,
-                        subjects = subjects
-                    )
-                    val pdfFile = PdfExporter.generateMarkSheetPdf(
-                        context = context,
-                        data = data,
-                        totalScore = totalObtained,
-                        maxScore = totalMax,
-                        percentage = percentage,
-                        grade = gradeLabel
-                    )
-
-                    // Share PDF
-                    val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "application/pdf"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "Mark Sheet - $studentName")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (AdService.shouldShowAds(context)) {
+                        val (canWatch, _) = AdService.canWatchRewarded(context)
+                        if (canWatch) {
+                            showRewardedModal = true
+                        } else {
+                            generateMarkSheetPdf(context, studentName, rollNumber, boardCouncil, subjects, totalObtained, totalMax, percentage, gradeLabel)
+                        }
+                    } else {
+                        generateMarkSheetPdf(context, studentName, rollNumber, boardCouncil, subjects, totalObtained, totalMax, percentage, gradeLabel)
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Mark Sheet PDF"))
-                    Toast.makeText(context, "Mark Sheet PDF generated!", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -399,5 +388,58 @@ fun MarkSheetTool(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateMarkSheetPdf(context, studentName, rollNumber, boardCouncil, subjects, totalObtained, totalMax, percentage, gradeLabel)
+            }
+        )
+    }
+}
+
+private fun generateMarkSheetPdf(
+    context: Context,
+    studentName: String,
+    rollNumber: String,
+    boardCouncil: String,
+    subjects: List<SubjectScore>,
+    totalObtained: Int,
+    totalMax: Int,
+    percentage: Double,
+    gradeLabel: String
+) {
+    try {
+        val data = MarkSheetData(
+            studentName = studentName,
+            rollNumber = rollNumber,
+            boardCouncil = boardCouncil,
+            subjects = subjects
+        )
+        val pdfFile = PdfExporter.generateMarkSheetPdf(
+            context = context,
+            data = data,
+            totalScore = totalObtained,
+            maxScore = totalMax,
+            percentage = percentage,
+            grade = gradeLabel
+        )
+
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Mark Sheet - $studentName")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share Mark Sheet PDF"))
+        Toast.makeText(context, "Mark Sheet PDF generated!", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate Mark Sheet PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }

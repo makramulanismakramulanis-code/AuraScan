@@ -208,7 +208,7 @@ fun RewardsTool(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Watch a short 5-second simulated video to earn 100 free AuraCoins instantly. Use coins for HD PDF exports and AI OCR.",
+                        text = "Watch a video ad to earn 100 AuraCoins. If a live ad is unavailable, you can use the 5-second simulation to earn your reward. Use coins for HD PDF exports and AI OCR.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -3,6 +3,7 @@ package com.example.ui.screens.tools
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -61,6 +63,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.ui.theme.AuraPrimary
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
+import com.example.util.PdfExporter
 import java.io.File
 import java.io.FileOutputStream
 
@@ -75,6 +80,7 @@ fun SignatureTool(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     val paths = remember { mutableStateListOf<SignaturePath>() }
     var currentPoints = remember { mutableStateListOf<Offset>() }
@@ -270,27 +276,58 @@ fun SignatureTool(
                             Toast.makeText(context, "Please sign on the canvas first", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
-                        val pngFile = exportSignatureToPng(context, paths.toList())
-                        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pngFile)
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "image/png"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            putExtra(Intent.EXTRA_SUBJECT, "AuraScan Digital Signature")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        
+                        if (AdService.shouldShowAds(context)) {
+                            val (canWatch, _) = AdService.canWatchRewarded(context)
+                            if (canWatch) {
+                                showRewardedModal = true
+                            } else {
+                                generateAndShareSignaturePdf(context, paths.toList())
+                            }
+                        } else {
+                            generateAndShareSignaturePdf(context, paths.toList())
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Signature PNG"))
-                        Toast.makeText(context, "Transparent PNG Signature ready!", Toast.LENGTH_SHORT).show()
                     },
-                    modifier = Modifier.weight(1.4f).height(48.dp).testTag("signature_download_button"),
+                    modifier = Modifier.weight(1.4f).height(48.dp).testTag("signature_pdf_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Download PNG", fontWeight = FontWeight.Bold)
+                    Text("Download PDF", fontWeight = FontWeight.Bold)
                 }
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateAndShareSignaturePdf(context, paths.toList())
+            }
+        )
+    }
+}
+
+private fun generateAndShareSignaturePdf(context: Context, paths: List<SignaturePath>) {
+    try {
+        val bmp = exportSignatureToPng(context, paths)
+        val bitmap = BitmapFactory.decodeFile(bmp.absolutePath)
+        val pdfFile = PdfExporter.generateDocumentPdf(context, bitmap, "AuraScan Digital Signature")
+        
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Save Signature PDF"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
 

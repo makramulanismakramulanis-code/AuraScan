@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +75,15 @@ fun RewardedAdModal(
         }
     }
 
+    val metrics by AdService.metrics.collectAsStateWithLifecycle()
+    val isAdReady = metrics.isRewardedReady
+
+    LaunchedEffect(Unit) {
+        if (!isAdReady) {
+            AdService.loadRewardedAd(context)
+        }
+    }
+
     Dialog(onDismissRequest = { if (!isPlayingAd || adFinished) onDismiss() }) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -107,7 +118,7 @@ fun RewardedAdModal(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Earn 100 AuraCoins",
+                        text = "Unlock PDF with Ad",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -115,7 +126,8 @@ fun RewardedAdModal(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Watch a short 5-second video to earn 100 AuraCoins for HD exports and unlimited AI features.",
+                        text = if (isAdReady) "Watch a short video ad to unlock your HD PDF export and earn 100 AuraCoins." 
+                               else "Connecting to ad network... If no live ad is available, you can use the instant 5-second reward simulation.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -131,17 +143,33 @@ fun RewardedAdModal(
                             onClick = onDismiss,
                             modifier = Modifier.weight(1f).testTag("rewarded_cancel_button")
                         ) {
-                            Text("No thanks")
+                            Text("Cancel")
                         }
 
                         Button(
-                            onClick = { isPlayingAd = true },
+                            onClick = {
+                                val activity = findActivity(context)
+                                if (activity != null && isAdReady) {
+                                    AdService.showRewardedAd(
+                                        activity = activity,
+                                        onAdDismissed = {
+                                            onDismiss()
+                                        },
+                                        onRewardEarned = { coins ->
+                                            onRewardEarned(coins)
+                                        }
+                                    )
+                                } else {
+                                    // Start simulation
+                                    isPlayingAd = true
+                                }
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary),
-                            modifier = Modifier.weight(1f).testTag("rewarded_watch_button")
+                            modifier = Modifier.weight(1.2f).testTag("rewarded_watch_button")
                         ) {
-                            Icon(Icons.Default.PlayCircleFilled, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(if (isAdReady) Icons.Default.PlayCircleFilled else Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Watch")
+                            Text(if (isAdReady) "Watch Video Ad" else "Use Simulation (5s)")
                         }
                     }
                 } else if (!adFinished) {
@@ -167,13 +195,13 @@ fun RewardedAdModal(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Sponsored Video Simulation",
+                        text = if (AdService.isRewardedAdLoaded()) "Loading Video Ad..." else "No Live Ad Available - Using Simulation",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Text(
-                        text = "Reward will be credited in $countdown seconds...",
+                        text = if (AdService.isRewardedAdLoaded()) "Please wait a moment..." else "AdMob error: No Fill. Reward will be credited in $countdown seconds...",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -203,4 +231,13 @@ fun RewardedAdModal(
             }
         }
     }
+}
+
+private fun findActivity(context: android.content.Context): android.app.Activity? {
+    var ctx = context
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
 }

@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
@@ -60,6 +61,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.ui.theme.AuraPrimary
 import com.example.util.QrGenerator
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
+import com.example.util.PdfExporter
 import java.io.File
 import java.io.FileOutputStream
 
@@ -73,6 +77,8 @@ fun QrStudioTool(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     var selectedType by remember { mutableStateOf(QrType.UPI) }
     var upiId by remember { mutableStateOf("merchant@upi") }
@@ -288,27 +294,62 @@ fun QrStudioTool(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Share QR")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Share PNG", fontSize = 11.sp)
                             }
 
                             Button(
                                 onClick = {
-                                    saveQrImage(context, bmp)
-                                    Toast.makeText(context, "QR saved to app storage!", Toast.LENGTH_SHORT).show()
+                                    if (AdService.shouldShowAds(context)) {
+                                        val (canWatch, _) = AdService.canWatchRewarded(context)
+                                        if (canWatch) {
+                                            showRewardedModal = true
+                                        } else {
+                                            generateAndShareQrPdf(context, bmp)
+                                        }
+                                    } else {
+                                        generateAndShareQrPdf(context, bmp)
+                                    }
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1.1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary)
                             ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Save QR")
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Download PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generatedQrBitmap?.let { generateAndShareQrPdf(context, it) }
+            }
+        )
+    }
+}
+
+private fun generateAndShareQrPdf(context: Context, bitmap: Bitmap) {
+    try {
+        val pdfFile = PdfExporter.generateDocumentPdf(context, bitmap, "AuraScan QR Code")
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Save QR PDF"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate QR PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
 

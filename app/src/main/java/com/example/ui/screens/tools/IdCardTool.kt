@@ -64,6 +64,8 @@ import androidx.core.content.FileProvider
 import com.example.ui.theme.AuraPrimary
 import com.example.util.ImageProcessor
 import com.example.util.PdfExporter
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
 
 @Composable
 fun IdCardTool(
@@ -74,6 +76,8 @@ fun IdCardTool(
     var frontBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var backBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isMaskAadhaarEnabled by remember { mutableStateOf(false) }
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     var targetPickingSide by remember { mutableStateOf<String>("front") }
 
@@ -298,24 +302,16 @@ fun IdCardTool(
             // Generate Merged ID Card PDF Button
             Button(
                 onClick = {
-                    val front = processedFront ?: createSampleCardBitmap("SAMPLE ID FRONT", "Rahul Sharma\nDOB: 15/08/1995")
-                    val back = backBitmap ?: createSampleCardBitmap("SAMPLE ID BACK", "Address: Palm Avenue\nPIN: 560001")
-
-                    val pdfFile = PdfExporter.generateMergedIdCardPdf(
-                        context = context,
-                        frontBitmap = front,
-                        backBitmap = back
-                    )
-
-                    val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "application/pdf"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "AuraScan 2-Sided ID Card")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (AdService.shouldShowAds(context)) {
+                        val (canWatch, _) = AdService.canWatchRewarded(context)
+                        if (canWatch) {
+                            showRewardedModal = true
+                        } else {
+                            generateIdPdf(context, processedFront, backBitmap)
+                        }
+                    } else {
+                        generateIdPdf(context, processedFront, backBitmap)
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Merged ID PDF"))
-                    Toast.makeText(context, "ID Card PDF ready for 1:1 printing!", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -329,6 +325,43 @@ fun IdCardTool(
                 Text("Generate Merged ID Card PDF", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateIdPdf(context, processedFront, backBitmap)
+            }
+        )
+    }
+}
+
+private fun generateIdPdf(context: Context, front: Bitmap?, back: Bitmap?) {
+    try {
+        val f = front ?: createSampleCardBitmap("SAMPLE ID FRONT", "Rahul Sharma\nDOB: 15/08/1995")
+        val b = back ?: createSampleCardBitmap("SAMPLE ID BACK", "Address: Palm Avenue\nPIN: 560001")
+
+        val pdfFile = PdfExporter.generateMergedIdCardPdf(
+            context = context,
+            frontBitmap = f,
+            backBitmap = b
+        )
+
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "AuraScan 2-Sided ID Card")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share Merged ID PDF"))
+        Toast.makeText(context, "ID Card PDF ready for 1:1 printing!", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate ID PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
 

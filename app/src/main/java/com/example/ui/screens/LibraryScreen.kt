@@ -66,6 +66,8 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.example.model.DocumentType
 import com.example.model.ScanDocument
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
 import com.example.ui.theme.AuraPrimary
 import com.example.ui.theme.CoinGold
 import com.example.util.PdfExporter
@@ -91,6 +93,7 @@ fun LibraryScreen(
     var docToRename by remember { mutableStateOf<ScanDocument?>(null) }
     var renameInput by remember { mutableStateOf("") }
     var docToExportPdf by remember { mutableStateOf<ScanDocument?>(null) }
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     val filteredDocs = remember(documents, searchQuery, selectedFilterType) {
         documents.filter { doc ->
@@ -252,8 +255,19 @@ fun LibraryScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            docToExportPdf = doc
-                            selectedDocForDetail = null
+                            if (AdService.shouldShowAds(context)) {
+                                val (canWatch, _) = AdService.canWatchRewarded(context)
+                                if (canWatch) {
+                                    showRewardedModal = true
+                                    // The doc is already in 'selectedDocForDetail', we'll use that after the ad
+                                } else {
+                                    docToExportPdf = doc
+                                    selectedDocForDetail = null
+                                }
+                            } else {
+                                docToExportPdf = doc
+                                selectedDocForDetail = null
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary)
                     ) {
@@ -386,7 +400,7 @@ fun LibraryScreen(
                 Button(
                     onClick = {
                         if (selectedQuality == PdfQuality.HD && userCoins < 50) {
-                            Toast.makeText(context, "Insufficient coins for HD export. Watch a rewarded video or choose Standard.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Insufficient coins for HD export. Watch a rewarded video in Tools or choose Standard.", Toast.LENGTH_LONG).show()
                             return@Button
                         }
                         if (selectedQuality == PdfQuality.HD) {
@@ -418,6 +432,23 @@ fun LibraryScreen(
                 TextButton(onClick = { docToExportPdf = null }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+                // Do not proceed with export if ad is cancelled
+            },
+            onRewardEarned = { coins ->
+                onSpendCoins(-coins) // Grant coins
+                showRewardedModal = false
+                Toast.makeText(context, "Reward Granted! You can now export in HD.", Toast.LENGTH_SHORT).show()
+                
+                // Now show the export dialog
+                selectedDocForDetail?.let { docToExportPdf = it }
             }
         )
     }

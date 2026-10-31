@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,7 +52,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ai.GeminiService
 import com.example.ui.theme.AuraPrimary
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
+import com.example.util.PdfExporter
+import androidx.core.content.FileProvider
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun HandwritingTool(
@@ -59,6 +67,8 @@ fun HandwritingTool(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
 
     var rawNotes by remember {
         mutableStateOf(
@@ -202,15 +212,35 @@ fun HandwritingTool(
                                 color = AuraPrimary
                             )
 
-                            IconButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Clean Notes", cleanNotes))
-                                    Toast.makeText(context, "Copied Formatted Notes!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Formatted Notes", tint = AuraPrimary)
+                            Row {
+                                IconButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Clean Notes", cleanNotes))
+                                        Toast.makeText(context, "Copied Formatted Notes!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Formatted Notes", tint = AuraPrimary)
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        if (AdService.shouldShowAds(context)) {
+                                            val (canWatch, _) = AdService.canWatchRewarded(context)
+                                            if (canWatch) {
+                                                showRewardedModal = true
+                                            } else {
+                                                generateAndShareNotesPdf(context, cleanNotes)
+                                            }
+                                        } else {
+                                            generateAndShareNotesPdf(context, cleanNotes)
+                                        }
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = "Download PDF", tint = AuraPrimary)
+                                }
                             }
                         }
 
@@ -226,5 +256,32 @@ fun HandwritingTool(
                 }
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateAndShareNotesPdf(context, cleanNotes)
+            }
+        )
+    }
+}
+
+private fun generateAndShareNotesPdf(context: Context, notes: String) {
+    try {
+        val pdfFile = PdfExporter.generateTextPdf(context, "AuraScan Digitized Notes", notes)
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Save Notes PDF"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }

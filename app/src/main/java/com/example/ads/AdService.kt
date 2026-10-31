@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -14,7 +15,8 @@ data class AdMetrics(
     val bannerFailCount: Int = 0,
     val rewardedStarted: Int = 0,
     val rewardedCompleted: Int = 0,
-    val coinsGranted: Int = 0
+    val coinsGranted: Int = 0,
+    val isRewardedReady: Boolean = false
 )
 
 object AdService {
@@ -29,8 +31,8 @@ object AdService {
     private const val KEY_DAILY_REWARDED_COUNT = "daily_rewarded_count"
     private const val KEY_LAST_REWARDED_TIMESTAMP = "last_rewarded_timestamp"
 
-    const val MAX_DAILY_REWARDED = 5
-    const val COOLDOWN_SECONDS = 30
+    val MAX_DAILY_REWARDED: Int get() = if (AdConfig.USE_TEST_ADS) 50 else 5
+    val COOLDOWN_SECONDS: Int get() = if (AdConfig.USE_TEST_ADS) 0 else 30
     const val REWARD_AMOUNT = 100
 
     private val _metrics = MutableStateFlow(AdMetrics())
@@ -39,6 +41,9 @@ object AdService {
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
+
+    private var rewardedAd: com.google.android.gms.ads.rewarded.RewardedAd? = null
+    private var isAdLoading = false
 
     fun init(context: Context) {
         val prefs = getPrefs(context)
@@ -49,7 +54,106 @@ object AdService {
             rewardedCompleted = prefs.getInt(KEY_METRICS_REWARDED_COMPLETE, 0),
             coinsGranted = prefs.getInt(KEY_METRICS_COINS_GRANTED, 0)
         )
+        // Pre-load a rewarded ad
+        loadRewardedAd(context)
     }
+
+    fun loadRewardedAd(context: Context) {
+        if (rewardedAd != null) {
+            _metrics.value = _metrics.value.copy(isRewardedReady = true)
+            return
+        }
+        if (isAdLoading) return
+        isAdLoading = true
+
+        val adRequest = com.google.android.gms.ads.AdRequest.Builder().build()
+        val unitId = AdConfig.getAdUnitId("rewarded")
+        android.util.Log.d("AdService", "Requesting RewardedAd with ID: $unitId (USE_TEST_ADS=${AdConfig.USE_TEST_ADS})")
+
+        com.google.android.gms.ads.rewarded.RewardedAd.load(
+            context,
+            unitId,
+            adRequest,
+            object : com.google.android.gms.ads.rewarded.RewardedAdLoadCallback() {
+                override fun onAdFailedToLoad(adError: com.google.android.gms.ads.LoadAdError) {
+                    android.util.Log.e("AdService", "Rewarded ad failed to load: code=${adError.code}, message=${adError.message}")
+                    rewardedAd = null
+                    isAdLoading = false
+                    _metrics.value = _metrics.value.copy(isRewardedReady = false)
+                    // Retry after 15 seconds if failed
+                    loadRewardedAdWithDelay(context)
+                }
+
+                override fun onAdLoaded(ad: com.google.android.gms.ads.rewarded.RewardedAd) {
+                    android.util.Log.d("AdService", "Rewarded ad loaded successfully and ready!")
+                    rewardedAd = ad
+                    isAdLoading = false
+                    _metrics.value = _metrics.value.copy(isRewardedReady = true)
+                }
+            }
+        )
+    }
+
+    private fun loadRewardedAdWithDelay(context: Context) {
+        kotlinx.coroutines.MainScope().launch {
+            kotlinx.coroutines.delay(15000)
+            loadRewardedAd(context)
+        }
+    }
+
+    fun showRewardedAd(
+        activity: android.app.Activity,
+        onAdDismissed: () -> Unit,
+        onRewardEarned: (Int) -> Unit
+    ) {
+        val ad = rewardedAd
+        if (ad != null) {
+            var rewardEarned = false
+            var earnedCoins = REWARD_AMOUNT
+
+            ad.fullScreenContentCallback = object : com.google.android.gms.ads.FullScreenContentCallback() {
+                override fun onAdShowedFullScreenContent() {
+                    android.util.Log.d("AdService", "Rewarded ad showed successfully in full screen")
+                    recordRewardedStarted(activity.applicationContext)
+                }
+
+                override fun onAdDismissedFullScreenContent() {
+                    android.util.Log.d("AdService", "Rewarded ad dismissed. rewardEarned=$rewardEarned")
+                    rewardedAd = null
+                    _metrics.value = _metrics.value.copy(isRewardedReady = false)
+                    loadRewardedAd(activity.applicationContext) // Preload next one
+
+                    if (rewardEarned) {
+                        val coins = recordRewardedCompleted(activity.applicationContext)
+                        onRewardEarned(coins)
+                    } else {
+                        onAdDismissed()
+                    }
+                }
+
+                override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) {
+                    android.util.Log.e("AdService", "Rewarded ad failed to show: ${error.message}")
+                    rewardedAd = null
+                    _metrics.value = _metrics.value.copy(isRewardedReady = false)
+                    loadRewardedAd(activity.applicationContext)
+                    onAdDismissed()
+                }
+            }
+
+            ad.show(activity) { rewardItem ->
+                android.util.Log.d("AdService", "Reward earned callback: amount=${rewardItem.amount}")
+                rewardEarned = true
+                earnedCoins = rewardItem.amount.coerceAtLeast(REWARD_AMOUNT)
+            }
+        } else {
+            android.util.Log.w("AdService", "Rewarded ad was null when show requested.")
+            _metrics.value = _metrics.value.copy(isRewardedReady = false)
+            loadRewardedAd(activity.applicationContext)
+            onAdDismissed()
+        }
+    }
+
+    fun isRewardedAdLoaded(): Boolean = rewardedAd != null
 
     fun shouldShowAds(context: Context): Boolean {
         if (!AdConfig.ADS_ENABLED) return false

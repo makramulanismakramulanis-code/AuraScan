@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -58,7 +59,14 @@ import com.example.ai.GeminiService
 import com.example.model.BillBreakdown
 import com.example.model.ExpenseItem
 import com.example.ui.theme.AuraPrimary
+import com.example.ads.AdService
+import com.example.ui.components.RewardedAdModal
+import com.example.util.PdfExporter
+import androidx.core.content.FileProvider
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.Locale
 
 @Composable
@@ -70,6 +78,8 @@ fun ExtractSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    var showRewardedModal by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     var extractionResult by remember { mutableStateOf<ExtractedDocumentResult?>(null) }
     var editableText by remember { mutableStateOf("") }
@@ -265,25 +275,74 @@ fun ExtractSheet(
                             Text("Copy Text")
                         }
 
-                        Button(
+                        OutlinedButton(
                             onClick = {
-                                val updated = extractionResult?.copy(extractedText = editableText)
-                                    ?: ExtractedDocumentResult(
-                                        documentType = com.example.model.DocumentType.DOCUMENT,
-                                        extractedText = editableText
-                                    )
-                                onSaveExtracted(updated)
-                                onDismiss()
+                                if (AdService.shouldShowAds(context)) {
+                                    val (canWatch, _) = AdService.canWatchRewarded(context)
+                                    if (canWatch) {
+                                        showRewardedModal = true
+                                    } else {
+                                        generateAndShareExtractPdf(context, editableText)
+                                    }
+                                } else {
+                                    generateAndShareExtractPdf(context, editableText)
+                                }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary),
-                            modifier = Modifier.weight(1f).testTag("done_extract_button")
+                            modifier = Modifier.weight(1.2f).testTag("extract_pdf_button")
                         ) {
-                            Text("Done", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Download PDF")
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            val updated = extractionResult?.copy(extractedText = editableText)
+                                ?: ExtractedDocumentResult(
+                                    documentType = com.example.model.DocumentType.DOCUMENT,
+                                    extractedText = editableText
+                                )
+                            onSaveExtracted(updated)
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AuraPrimary),
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("done_extract_button")
+                    ) {
+                        Text("Save & Close", fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
+    }
+
+    if (showRewardedModal) {
+        RewardedAdModal(
+            onDismiss = { 
+                showRewardedModal = false 
+            },
+            onRewardEarned = {
+                showRewardedModal = false
+                generateAndShareExtractPdf(context, editableText)
+            }
+        )
+    }
+}
+
+private fun generateAndShareExtractPdf(context: Context, text: String) {
+    try {
+        val pdfFile = PdfExporter.generateTextPdf(context, "AuraScan OCR Extraction", text)
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", pdfFile)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Save Extraction PDF"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to generate PDF: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
 

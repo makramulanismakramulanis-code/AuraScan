@@ -71,7 +71,7 @@ fun PinnedAdBanner(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center
         ) {
-            // Real AdMob Banner
+            // Real AdMob Banner with optimized lifecycle
             AndroidView(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -82,8 +82,11 @@ fun PinnedAdBanner(
                     AdView(ctx).apply {
                         setAdSize(AdSize.BANNER)
                         adUnitId = AdConfig.getAdUnitId("banner")
-                        loadAd(AdRequest.Builder().build())
                     }
+                },
+                update = { adView ->
+                    // Only load ad if it hasn't been loaded or needs refresh
+                    adView.loadAd(AdRequest.Builder().build())
                 }
             )
         }

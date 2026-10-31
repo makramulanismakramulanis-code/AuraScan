@@ -32,12 +32,18 @@ object GeminiService {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private const val MODEL_NAME = "gemini-2.5-flash"
+    private val CANDIDATE_MODELS = listOf(
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
+        "gemini-flash-latest"
+    )
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     private fun getApiKey(): String {
         return try {
-            BuildConfig.GEMINI_API_KEY
+            val key = BuildConfig.GEMINI_API_KEY
+            if (key.isNotBlank() && key != "MY_GEMINI_API_KEY") key else ""
         } catch (e: Exception) {
             ""
         }
@@ -89,8 +95,14 @@ object GeminiService {
     }
 
     suspend fun translateText(text: String, sourceLang: String, targetLang: String): Result<String> = withContext(Dispatchers.IO) {
+        val languageInstruction = if (sourceLang == "Auto Detect") {
+            "detecting the source language automatically"
+        } else {
+            "from $sourceLang"
+        }
+        
         val prompt = """
-            Translate the following text from $sourceLang to $targetLang.
+            Translate the following text $languageInstruction to $targetLang.
             Maintain original tone, formatting, and cultural nuance.
             Return ONLY the translated text without extra explanation:
             
@@ -155,98 +167,135 @@ object GeminiService {
             return Result.failure(IllegalStateException("Please configure your GEMINI_API_KEY in the Secrets panel in AI Studio."))
         }
 
-        return try {
-            val base64Data = bitmapToBase64(bitmap)
-            val jsonPayload = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply { put("text", prompt) })
-                            put(JSONObject().apply {
-                                put("inline_data", JSONObject().apply {
-                                    put("mime_type", "image/jpeg")
-                                    put("data", base64Data)
-                                })
+        val base64Data = bitmapToBase64(bitmap)
+        val jsonPayload = JSONObject().apply {
+            val contents = JSONArray().apply {
+                val contentObj = JSONObject().apply {
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply { put("text", prompt) })
+                        put(JSONObject().apply {
+                            put("inline_data", JSONObject().apply {
+                                put("mime_type", "image/jpeg")
+                                put("data", base64Data)
                             })
-                        }
-                        put("parts", parts)
+                        })
                     }
-                    put(contentObj)
+                    put("parts", parts)
                 }
-                put("contents", contents)
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", 0.2)
-                    put("response_mime_type", "application/json")
-                })
+                put(contentObj)
             }
-
-            val requestBody = jsonPayload.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/$MODEL_NAME:generateContent?key=$key")
-                .post(requestBody)
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return Result.failure(Exception("API Error ${response.code}: ${response.message}"))
-            }
-
-            val body = response.body?.string() ?: ""
-            val candidateText = extractCandidateText(body)
-            Result.success(candidateText)
-        } catch (e: Exception) {
-            Result.failure(e)
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.2)
+                put("response_mime_type", "application/json")
+            })
         }
+
+        var lastError: Exception? = null
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val requestBody = jsonPayload.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("$BASE_URL/$model:generateContent?key=$key")
+                    .post(requestBody)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val candidateText = extractCandidateText(body)
+                    if (candidateText.isNotEmpty()) {
+                        return Result.success(candidateText)
+                    }
+                } else {
+                    val errorMsg = try {
+                        val errorObj = JSONObject(body).optJSONObject("error")
+                        errorObj?.optString("message") ?: "API Error ${response.code}"
+                    } catch (e: Exception) {
+                        "API Error ${response.code}: ${response.message}"
+                    }
+                    lastError = Exception(errorMsg)
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+
+        return Result.failure(lastError ?: Exception("Failed to process image with Gemini"))
     }
 
     private fun callGeminiTextOnly(prompt: String): Result<String> {
         val key = getApiKey()
         if (key.isBlank() || key == "MY_GEMINI_API_KEY") {
-            return Result.failure(IllegalStateException("Please configure your GEMINI_API_KEY in the Secrets panel in AI Studio."))
+            return Result.failure(IllegalStateException("API Key missing. Please set GEMINI_API_KEY in the Secrets panel."))
         }
 
-        return try {
-            val jsonPayload = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply { put("text", prompt) })
-                        }
-                        put("parts", parts)
+        val jsonPayload = JSONObject().apply {
+            val contents = JSONArray().apply {
+                val contentObj = JSONObject().apply {
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply { put("text", prompt) })
                     }
-                    put(contentObj)
+                    put("parts", parts)
                 }
-                put("contents", contents)
+                put(contentObj)
             }
-
-            val requestBody = jsonPayload.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/$MODEL_NAME:generateContent?key=$key")
-                .post(requestBody)
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return Result.failure(Exception("API Error ${response.code}: ${response.message}"))
-            }
-
-            val body = response.body?.string() ?: ""
-            val candidateText = extractCandidateText(body)
-            Result.success(candidateText)
-        } catch (e: Exception) {
-            Result.failure(e)
+            put("contents", contents)
         }
+
+        var lastError: Exception? = null
+        for (model in CANDIDATE_MODELS) {
+            try {
+                val requestBody = jsonPayload.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url("$BASE_URL/$model:generateContent?key=$key")
+                    .post(requestBody)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val body = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val candidateText = extractCandidateText(body)
+                    if (candidateText.isNotEmpty()) {
+                        return Result.success(candidateText)
+                    }
+                } else {
+                    val errorMsg = try {
+                        val errorObj = JSONObject(body).optJSONObject("error")
+                        errorObj?.optString("message") ?: "API Error ${response.code}"
+                    } catch (e: Exception) {
+                        "API Error ${response.code}: ${response.message}"
+                    }
+                    lastError = Exception(errorMsg)
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+
+        return Result.failure(lastError ?: Exception("Translation failed with Gemini"))
     }
 
     private fun extractCandidateText(responseBody: String): String {
-        val root = JSONObject(responseBody)
-        val candidates = root.optJSONArray("candidates") ?: return ""
-        if (candidates.length() == 0) return ""
-        val candidate = candidates.getJSONObject(0)
-        val content = candidate.optJSONObject("content") ?: return ""
-        val parts = content.optJSONArray("parts") ?: return ""
-        if (parts.length() == 0) return ""
-        return parts.getJSONObject(0).optString("text", "")
+        return try {
+            val root = JSONObject(responseBody)
+            val candidates = root.optJSONArray("candidates") ?: return ""
+            if (candidates.length() == 0) return ""
+            val candidate = candidates.getJSONObject(0)
+            val content = candidate.optJSONObject("content") ?: return ""
+            val parts = content.optJSONArray("parts") ?: return ""
+            val sb = StringBuilder()
+            for (i in 0 until parts.length()) {
+                val part = parts.getJSONObject(i)
+                val text = part.optString("text", "")
+                if (text.isNotEmpty()) {
+                    sb.append(text)
+                }
+            }
+            sb.toString().trim()
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     private fun parseDocumentJson(jsonString: String): ExtractedDocumentResult {
